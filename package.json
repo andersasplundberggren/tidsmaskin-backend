@@ -1,0 +1,15 @@
+{
+  "name": "tidsmaskin-backend",
+  "version": "1.0.0",
+  "description": "Backend API for Tidsmaskin",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.1",
+    "node-fetch": "^3.3.2",
+    "cors": "^2.8.5"
+  }
+}
