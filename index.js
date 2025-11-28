@@ -5,8 +5,101 @@ import cors from "cors";
 const app = express();
 app.use(cors());
 
+// ===== Spotify Token Cache ===========================================
+let spotifyToken = null;
+let spotifyTokenExpiry = 0;
+
+async function getSpotifyToken() {
+  // Returnera cached token om den fortfarande är giltig
+  if (spotifyToken && Date.now() < spotifyTokenExpiry) {
+    return spotifyToken;
+  }
+
+  try {
+    const clientId = process.env.SPOTIFY_CLIENT_ID;
+    const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+
+    const response = await fetch("https://accounts.spotify.com/api/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": "Basic " + Buffer.from(clientId + ":" + clientSecret).toString("base64")
+      },
+      body: "grant_type=client_credentials"
+    });
+
+    const data = await response.json();
+    spotifyToken = data.access_token;
+    // Token giltig i ~1 timme, vi cachar i 50 minuter
+    spotifyTokenExpiry = Date.now() + (50 * 60 * 1000);
+    return spotifyToken;
+  } catch (error) {
+    console.error("Spotify token error:", error);
+    return null;
+  }
+}
+
 app.get("/", (req, res) => {
   res.json({ status: "OK – Tidsmaskin backend körs 🔧" });
+});
+
+// ===== Spotify Search ================================================
+app.get("/spotify", async (req, res) => {
+  try {
+    const { title, artist } = req.query;
+    if (!title || !artist) {
+      return res.status(400).json({ error: "Missing ?title=...&artist=..." });
+    }
+
+    const token = await getSpotifyToken();
+    if (!token) {
+      return res.json({ trackId: null, error: "Could not get Spotify token" });
+    }
+
+    // Rensa söksträngen
+    const cleanTitle = title.replace(/\(.*?\)/g, "").trim();
+    const cleanArtist = artist.split("ft.")[0].split("feat.")[0].split("&")[0].trim();
+
+    // Första sökning: specifik
+    const query = encodeURIComponent(`track:${cleanTitle} artist:${cleanArtist}`);
+    const response = await fetch(
+      `https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`,
+      { headers: { "Authorization": `Bearer ${token}` } }
+    );
+
+    const data = await response.json();
+
+    if (data.tracks?.items?.length > 0) {
+      return res.json({ 
+        trackId: data.tracks.items[0].id,
+        name: data.tracks.items[0].name,
+        artist: data.tracks.items[0].artists[0]?.name
+      });
+    }
+
+    // Fallback: enklare sökning
+    const simpleQuery = encodeURIComponent(`${cleanTitle} ${cleanArtist}`);
+    const fallbackResponse = await fetch(
+      `https://api.spotify.com/v1/search?q=${simpleQuery}&type=track&limit=1`,
+      { headers: { "Authorization": `Bearer ${token}` } }
+    );
+
+    const fallbackData = await fallbackResponse.json();
+
+    if (fallbackData.tracks?.items?.length > 0) {
+      return res.json({ 
+        trackId: fallbackData.tracks.items[0].id,
+        name: fallbackData.tracks.items[0].name,
+        artist: fallbackData.tracks.items[0].artists[0]?.name
+      });
+    }
+
+    return res.json({ trackId: null });
+
+  } catch (err) {
+    console.error("Spotify search error:", err);
+    return res.json({ trackId: null, error: err.message });
+  }
 });
 
 // ===== TMDb ====================================================
